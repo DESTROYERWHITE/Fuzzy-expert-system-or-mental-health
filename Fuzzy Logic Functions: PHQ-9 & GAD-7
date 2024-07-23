@@ -1,0 +1,171 @@
+const express = require('express');
+const bodyParser = require('body-parser');
+const { createClient } = require('@supabase/supabase-js');
+const app = express();
+const port = process.env.PORT || 3000;
+
+app.use(bodyParser.json());
+
+const supabase = createClient('https://jlgxgjmyewqtlinfjhuy.supabase.co', 'process.env.SUPABASE_KEY');
+
+function fuzzifyPHQ9(score) {
+  let membershipValues = {
+    low: 0,
+    mild: 0,
+    moderate: 0,
+    moderatelySevere: 0,
+    high: 0
+  };
+
+  if (score >= 0 && score <= 4) {
+    membershipValues.low = 1;
+  } else if (score >= 5 && score <= 9) {
+    membershipValues.mild = 1;
+  } else if (score >= 10 && score <= 14) {
+    membershipValues.moderate = 1;
+  } else if (score >= 15 && score <= 19) {
+    membershipValues.moderatelySevere = 1;
+  } else if (score >= 20 && score <= 27) {
+    membershipValues.high = 1;
+  }
+
+  return membershipValues;
+}
+
+function fuzzifyGAD7(score) {
+  let membershipValues = {
+    low: 0,
+    mild: 0,
+    moderate: 0,
+    moderatelySevere: 0,
+    high: 0
+  };
+
+  if (score >= 0 && score <= 3) {
+    membershipValues.low = 1;
+  } else if (score >= 4 && score <= 7) {
+    membershipValues.mild = 1;
+  } else if (score >= 8 && score <= 11) {
+    membershipValues.moderate = 1;
+  } else if (score >= 12 && score <= 15) {
+    membershipValues.moderatelySevere = 1;
+  } else if (score >= 16 && score <= 21) {
+    membershipValues.high = 1;
+  }
+
+  return membershipValues;
+}
+
+function inference(score, testType) {
+  if (testType === 'PHQ-9') {
+    if (score >= 0 && score <= 4) {
+      return "low";
+    } else if (score >= 5 && score <= 9) {
+      return "mild";
+    } else if (score >= 10 && score <= 14) {
+      return "moderate";
+    } else if (score >= 15 && score <= 19) {
+      return "moderately severe";
+    } else if (score >= 20 && score <= 27) {
+      return "highly severe";
+    }
+  } else if (testType === 'GAD-7') {
+    if (score >= 0 && score <= 3) {
+      return "low";
+    } else if (score >= 4 && score <= 7) {
+      return "mild";
+    } else if (score >= 8 && score <= 11) {
+      return "moderate";
+    } else if (score >= 12 && score <= 15) {
+      return "moderately severe";
+    } else if (score >= 16 && score <= 21) {
+      return "highly severe";
+    }
+  }
+}
+
+function defuzzify(membershipValues) {
+  let numerator = 0;
+  let denominator = 0;
+
+  const riskLevels = {
+    low: 1,
+    mild: 2,
+    moderate: 3,
+    moderatelySevere: 4,
+    high: 5
+  };
+
+  for (let risk in membershipValues) {
+    numerator += membershipValues[risk] * riskLevels[risk];
+    denominator += membershipValues[risk];
+  }
+
+  return numerator / denominator;
+}
+
+function getRecommendation(risk) {
+  switch(risk) {
+    case "low":
+      return "No significant symptoms of anxiety. Continue to monitor.";
+    case "mild":
+      return "Mild anxiety. Consider lifestyle changes and self-care.";
+    case "moderate":
+      return "Moderate anxiety. Consider consulting a healthcare provider.";
+    case "moderately severe":
+      return "Moderately severe anxiety. Professional help is recommended.";
+    case "highly severe":
+      return "Severe anxiety. Immediate professional help is required.";
+    default:
+      return "No recommendation available.";
+  }
+}
+
+app.post('/fuzzy', async (req, res) => {
+  const { score, testType, userId } = req.body;
+  let membershipValues;
+
+  if (testType === 'PHQ-9') {
+    membershipValues = fuzzifyPHQ9(score);
+  } else if (testType === 'GAD-7') {
+    membershipValues = fuzzifyGAD7(score);
+  }
+
+  const risk = inference(score, testType);
+  const defuzzifiedOutput = defuzzify(membershipValues);
+  const recommendation = getRecommendation(risk);
+
+  const { data, error } = await supabase
+    .from('Results')
+    .insert([
+      { user_id: userId, test_type: testType, score: score, defuzzified_output: defuzzifiedOutput }
+    ])
+    .single();
+
+  if (error) {
+    return res.status(500).json({ error: error.message });
+  }
+
+  const { error: recError } = await supabase
+    .from('Recommendations')
+    .insert([
+      { result_id: data.id, recommendation: recommendation }
+    ]);
+
+  if (recError) {
+    return res.status(500).json({ error: recError.message });
+  }
+
+  res.json({
+    result: {
+      membershipValues: membershipValues,
+      risk: risk,
+      defuzzifiedOutput: defuzzifiedOutput,
+      recommendation: recommendation
+    }
+  });
+});
+
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
+});

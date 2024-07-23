@@ -1,0 +1,137 @@
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:uuid/uuid.dart';
+
+void main() {
+  runApp(MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      home: TestSelectionScreen(),
+    );
+  }
+}
+
+class TestSelectionScreen extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('Select a Test'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => QuestionnaireScreen(testType: 'PHQ-9')),
+                );
+              },
+              child: Text('PHQ-9 Test'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => QuestionnaireScreen(testType: 'GAD-7')),
+                );
+              },
+              child: Text('GAD-7 Test'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class QuestionnaireScreen extends StatefulWidget {
+  final String testType;
+
+  QuestionnaireScreen({required this.testType});
+
+  @override
+  _QuestionnaireScreenState createState() => _QuestionnaireScreenState();
+}
+
+class _QuestionnaireScreenState extends State<QuestionnaireScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final List<int> _answers = List.filled(9, 0);  // Assuming max 9 questions
+  final String userId = Uuid().v4();
+
+  Future<void> _submitAnswers() async {
+    final score = _answers.reduce((a, b) => a + b);
+
+    final response = await http.post(
+      Uri.parse('https://jlgxgjmyewqtlinfjhuy.supabase.co'),
+      headers: <String, String>{
+        'Content-Type': 'application/json',
+      },
+      body: jsonEncode(<String, dynamic>{
+        'testType': widget.testType,
+        'score': score,
+        'userId': userId,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final result = jsonDecode(response.body);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Result: ${result['result']['recommendation']}')),
+      );
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to get result')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text('${widget.testType} Questionnaire'),
+      ),
+      body: Form(
+        key: _formKey,
+        child: ListView.builder(
+          itemCount: _answers.length,
+          itemBuilder: (context, index) {
+            return ListTile(
+              title: Text('Question ${index + 1}'),
+              trailing: DropdownButton<int>(
+                value: _answers[index],
+                onChanged: (int? newValue) {
+                  setState(() {
+                    _answers[index] = newValue!;
+                  });
+                },
+                items: <int>[0, 1, 2, 3].map<DropdownMenuItem<int>>((int value) {
+                  return DropdownMenuItem<int>(
+                    value: value,
+                    child: Text(value.toString()),
+                  );
+                }).toList(),
+              ),
+            );
+          },
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          if (_formKey.currentState!.validate()) {
+            _submitAnswers();
+          }
+        },
+        child: Icon(Icons.check),
+      ),
+    );
+  }
+}
